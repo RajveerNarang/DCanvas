@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Advanced Whiteboard</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      #toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5em;
+        padding: 0.5em;
+        background: #f0f0f0;
+        border-bottom: 1px solid #ccc;
+      }
+      #toolbar > * {
+        margin-right: 0.5em;
+      }
+      canvas {
+        flex: 1;
+        touch-action: none;
+        background: #fff;
+        cursor: crosshair;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar">
+      <input type="color" id="colorPicker" value="#000000" />
+      <input type="range" id="penSize" min="1" max="20" value="4" />
+      <button onclick="setTool('pen')">Pen</button>
+      <button onclick="setTool('eraser')">Eraser</button>
+      <button onclick="setTool('rectangle')">Rectangle</button>
+      <button onclick="setTool('circle')">Circle</button>
+      <button onclick="setTool('square')">Square</button>
+      <button onclick="setTool('triangle')">Triangle</button>
+      <button onclick="toggleRuler()">Ruler</button>
+      <button onclick="undo()">Undo</button>
+      <button onclick="redo()">Redo</button>
+      <button onclick="clearCanvas()">Clear</button>
+      <button onclick="saveImage()">Save</button>
+      <input type="file" id="loadImage" onchange="loadImage(event)" />
+    </div>
+    <canvas id="board"></canvas>
+
+    <script>
+      const canvas = document.getElementById("board");
+      const ctx = canvas.getContext("2d");
+      const colorPicker = document.getElementById("colorPicker");
+      const penSize = document.getElementById("penSize");
+
+      let tool = "pen";
+      let drawing = false;
+      let startX, startY;
+      let paths = [];
+      let undone = [];
+      let rulerOn = false;
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height =
+          window.innerHeight - document.getElementById("toolbar").offsetHeight;
+        redraw();
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      function setTool(t) {
+        tool = t;
+      }
+
+      function toggleRuler() {
+        rulerOn = !rulerOn;
+        redraw();
+      }
+
+      function startDrawing(e) {
+        drawing = true;
+        [startX, startY] = [e.offsetX, e.offsetY];
+      }
+
+      function draw(e) {
+        if (!drawing) return;
+        const [x, y] = [e.offsetX, e.offsetY];
+        if (tool === "pen" || tool === "eraser") {
+          ctx.strokeStyle = tool === "eraser" ? "#fff" : colorPicker.value;
+          ctx.lineWidth = penSize.value;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          paths.push({
+            tool,
+            color: ctx.strokeStyle,
+            size: ctx.lineWidth,
+            from: [startX, startY],
+            to: [x, y],
+          });
+          startX = x;
+          startY = y;
+          undone = [];
+        }
+      }
+
+      function stopDrawing(e) {
+        if (!drawing) return;
+        drawing = false;
+        const [x, y] = [e.offsetX, e.offsetY];
+        if (["rectangle", "circle", "square", "triangle"].includes(tool)) {
+          ctx.strokeStyle = colorPicker.value;
+          ctx.lineWidth = penSize.value;
+          ctx.beginPath();
+          switch (tool) {
+            case "rectangle":
+              ctx.rect(startX, startY, x - startX, y - startY);
+              break;
+            case "square":
+              const size = Math.min(Math.abs(x - startX), Math.abs(y - startY));
+              ctx.rect(
+                startX,
+                startY,
+                size * Math.sign(x - startX),
+                size * Math.sign(y - startY)
+              );
+              break;
+            case "circle":
+              const r = Math.hypot(x - startX, y - startY) / 2;
+              ctx.arc((x + startX) / 2, (y + startY) / 2, r, 0, 2 * Math.PI);
+              break;
+            case "triangle":
+              ctx.moveTo(startX, y);
+              ctx.lineTo((startX + x) / 2, startY);
+              ctx.lineTo(x, y);
+              ctx.closePath();
+              break;
+          }
+          ctx.stroke();
+          paths.push({
+            tool,
+            color: ctx.strokeStyle,
+            size: ctx.lineWidth,
+            from: [startX, startY],
+            to: [x, y],
+          });
+          undone = [];
+        }
+      }
+
+      function undo() {
+        if (paths.length > 0) {
+          undone.push(paths.pop());
+          redraw();
+        }
+      }
+
+      function redo() {
+        if (undone.length > 0) {
+          paths.push(undone.pop());
+          redraw();
+        }
+      }
+
+      function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        paths = [];
+        undone = [];
+      }
+
+      function saveImage() {
+        const link = document.createElement("a");
+        link.download = "whiteboard.png";
+        link.href = canvas.toDataURL();
+        link.click();
+      }
+
+      function loadImage(event) {
+        const file = event.target.files[0];
+        const reader = new FileReader();
+        reader.onload = function (evt) {
+          const img = new Image();
+          img.onload = function () {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+          };
+          img.src = evt.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+
+      function redraw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (let p of paths) {
+          ctx.strokeStyle = p.tool === "eraser" ? "#fff" : p.color;
+          ctx.lineWidth = p.size;
+          ctx.beginPath();
+          switch (p.tool) {
+            case "pen":
+            case "eraser":
+              ctx.moveTo(...p.from);
+              ctx.lineTo(...p.to);
+              break;
+            case "rectangle":
+              ctx.rect(
+                p.from[0],
+                p.from[1],
+                p.to[0] - p.from[0],
+                p.to[1] - p.from[1]
+              );
+              break;
+            case "square":
+              const size = Math.min(
+                Math.abs(p.to[0] - p.from[0]),
+                Math.abs(p.to[1] - p.from[1])
+              );
+              ctx.rect(
+                p.from[0],
+                p.from[1],
+                size * Math.sign(p.to[0] - p.from[0]),
+                size * Math.sign(p.to[1] - p.from[1])
+              );
+              break;
+            case "circle":
+              const r =
+                Math.hypot(p.to[0] - p.from[0], p.to[1] - p.from[1]) / 2;
+              ctx.arc(
+                (p.to[0] + p.from[0]) / 2,
+                (p.to[1] + p.from[1]) / 2,
+                r,
+                0,
+                2 * Math.PI
+              );
+              break;
+            case "triangle":
+              ctx.moveTo(p.from[0], p.to[1]);
+              ctx.lineTo((p.from[0] + p.to[0]) / 2, p.from[1]);
+              ctx.lineTo(p.to[0], p.to[1]);
+              ctx.closePath();
+              break;
+          }
+          ctx.stroke();
+        }
+        if (rulerOn) drawRuler();
+      }
+
+      function drawRuler() {
+        ctx.strokeStyle = "#888";
+        ctx.lineWidth = 1;
+        for (let x = 0; x < canvas.width; x += 50) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
+          ctx.stroke();
+        }
+        for (let y = 0; y < canvas.height; y += 50) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+          ctx.stroke();
+        }
+      }
+
+      canvas.addEventListener("pointerdown", startDrawing);
+      canvas.addEventListener("pointermove", draw);
+      canvas.addEventListener("pointerup", stopDrawing);
+      canvas.addEventListener("pointerout", () => (drawing = false));
+    </script>
+  </body>
+</html>
